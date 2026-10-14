@@ -1,10 +1,14 @@
-"""File-transfer server skeleton. All methods are intentionally unimplemented."""
+"""File-transfer server with initial state; remaining methods are placeholders."""
 
 
 class FileTransferServer:
     def __init__(self, control_port):
-        # Prepare the control listener and per-client session state.
-        pass
+        self.control_port = control_port
+        self.control_socket = None
+        self.running = False
+
+        # Map each client's control socket to its session state when it connects.
+        self.sessions = {}
 
     def start(self):
         # Print the required startup messages and begin accepting clients.

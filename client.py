@@ -1,10 +1,18 @@
-"""File-transfer client skeleton. All methods are intentionally unimplemented."""
+"""File-transfer client with initial state; remaining methods are placeholders."""
 
 
 class FileTransferClient:
     def __init__(self):
-        # Prepare control/data connection state and the logged-in username.
-        pass
+        # Connection details and sockets are populated by the connect methods.
+        self.server_address = None
+        self.control_port = None
+        self.data_port = None
+        self.control_socket = None
+        self.data_socket = None
+
+        # A username is recorded only after a successful login.
+        self.username = None
+        self.running = False
 
     def run(self):
         # Print the startup message and process interactive commands until quit.
