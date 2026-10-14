@@ -1,4 +1,4 @@
-"""File-transfer client with initial state; remaining methods are placeholders."""
+"""File-transfer client with state and cleanup; other methods are placeholders."""
 
 
 class FileTransferClient:
@@ -79,8 +79,22 @@ class FileTransferClient:
         pass
 
     def close_connections(self):
-        # Release sockets after quit, connection failure, or an unexpected disconnect.
-        pass
+        for attribute in ("data_socket", "control_socket"):
+            connection = getattr(self, attribute)
+            if connection is not None:
+                try:
+                    connection.close()
+                except OSError:
+                    # Still release the other socket if this close fails.
+                    pass
+                finally:
+                    setattr(self, attribute, None)
+
+        self.server_address = None
+        self.control_port = None
+        self.data_port = None
+        self.username = None
+        # Keep the input loop running so the user can reconnect; quit will stop it.
 
 
 def main():

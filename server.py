@@ -1,4 +1,4 @@
-"""File-transfer server with initial state; remaining methods are placeholders."""
+"""File-transfer server with state and cleanup; other methods are placeholders."""
 
 
 class FileTransferServer:
@@ -79,12 +79,37 @@ class FileTransferServer:
         pass
 
     def close_session(self, session):
-        # Release a client's sockets and state after quit, disconnect, or failure.
-        pass
+        # Sessions are dictionaries with control_socket, data_socket,
+        # data_listener, and username entries; partially created sessions are valid.
+        control_socket = session.get("control_socket")
+        self.sessions.pop(control_socket, None)
+
+        for key in ("data_socket", "data_listener", "control_socket"):
+            connection = session.get(key)
+            if connection is not None:
+                try:
+                    connection.close()
+                except OSError:
+                    # A close failure must not prevent cleanup of other sockets.
+                    pass
+
+        session.clear()
 
     def shutdown(self):
-        # Close active sessions and listening sockets when the server stops.
-        pass
+        self.running = False
+
+        if self.control_socket is not None:
+            try:
+                self.control_socket.close()
+            except OSError:
+                pass
+            finally:
+                self.control_socket = None
+
+        # Closing a session removes it from the registry, so iterate a snapshot.
+        for session in list(self.sessions.values()):
+            self.close_session(session)
+        self.sessions.clear()
 
 
 def main():
