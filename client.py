@@ -1,4 +1,6 @@
-"""File-transfer client with state and cleanup; other methods are placeholders."""
+"""File-transfer client with TCP connection helpers, state, and cleanup."""
+
+import socket
 
 
 class FileTransferClient:
@@ -27,12 +29,40 @@ class FileTransferClient:
         pass
 
     def connect(self, server_address, control_port):
-        # Open a TCP control connection and follow the original Chat handshake.
-        pass
+        if self.control_socket is not None:
+            raise RuntimeError("Close the existing connection before reconnecting.")
+
+        control_port = int(control_port)
+        connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            connection.connect((server_address, control_port))
+        except (OSError, ValueError, TypeError, OverflowError):
+            connection.close()
+            raise
+
+        self.control_socket = connection
+        self.server_address = server_address
+        self.control_port = control_port
+        # TODO: Read the Chat handshake and advertised port once its format is known,
+        # then call connect_data_socket(). TCP connection alone is not login.
 
     def connect_data_socket(self, server_address, data_port):
-        # Connect to the server-advertised TCP data port and print required output.
-        pass
+        if self.control_socket is None:
+            raise RuntimeError("Open a control connection before the data connection.")
+        if self.data_socket is not None:
+            raise RuntimeError("The data connection is already open.")
+
+        data_port = int(data_port)
+        connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            connection.connect((server_address, data_port))
+        except (OSError, ValueError, TypeError, OverflowError):
+            connection.close()
+            raise
+
+        self.data_socket = connection
+        self.data_port = data_port
+        # The handshake caller must print the required status after validating it.
 
     def login(self, username):
         # Send the Chat login request and display the required status message.

@@ -1,7 +1,12 @@
 # CNT4713 File Transfer Project
 
-Skeleton only: every function/method contains a brief purpose comment and `pass`.
-There is no socket, file-transfer, command-loop, or entry-point implementation yet.
+Partial implementation: constructors, resource cleanup, the server control listener
+and acceptance loop, and client TCP connection helpers are implemented.
+The Chat handshake, server data-connection setup, file transfers, command loops,
+and entry points remain unfinished. Client `connect()` currently opens only the
+control socket; it does not yet negotiate or open the data connection automatically.
+The acceptance loop handles clients sequentially and closes each session when
+`handle_client()` returns; that handler is still a placeholder.
 The method breakdown is a suggested organization, not instructor-required naming.
 
 ## Files

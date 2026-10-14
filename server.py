@@ -1,4 +1,6 @@
-"""File-transfer server with state and cleanup; other methods are placeholders."""
+"""File-transfer server with TCP control setup, state, and cleanup."""
+
+import socket
 
 
 class FileTransferServer:
@@ -15,12 +17,48 @@ class FileTransferServer:
         pass
 
     def create_control_socket(self):
-        # Create, bind, and listen on a TCP socket using the supplied port.
-        pass
+        if self.control_socket is not None:
+            raise RuntimeError("The control listener is already open.")
+
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            listener.bind(("", int(self.control_port)))
+            listener.listen()
+        except (OSError, ValueError, TypeError, OverflowError):
+            listener.close()
+            raise
+
+        self.control_socket = listener
+        # Record the assigned port when port 0 is used for local testing.
+        self.control_port = listener.getsockname()[1]
 
     def accept_connections(self):
-        # Accept control connections and arrange independent client sessions.
-        pass
+        if self.control_socket is None:
+            raise RuntimeError("Create the control listener before accepting clients.")
+
+        # start() will set running before entering this loop.
+        while self.running:
+            try:
+                control_socket, client_address = self.control_socket.accept()
+            except OSError:
+                if not self.running:
+                    break
+                raise
+
+            session = {
+                "control_socket": control_socket,
+                "client_address": client_address,
+                "data_listener": None,
+                "data_socket": None,
+                "username": None,
+            }
+            self.sessions[control_socket] = session
+            try:
+                # The session handler will own the handshake and command loop.
+                self.handle_client(control_socket, client_address)
+            finally:
+                self.close_session(session)
 
     def handle_client(self, control_socket, client_address):
         # Run one client's connection, login, command, and cleanup lifecycle.
