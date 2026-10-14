@@ -93,12 +93,60 @@ class FileTransferClient:
         pass
 
     def send_command(self, command, argument=None):
-        # Send a command on the control socket using the required message framing.
-        pass
+        """Send one UTF-8 command line; LF framing awaits Chat-spec confirmation."""
+        if self.control_socket is None:
+            raise RuntimeError("Open a control connection before sending commands.")
+        if not isinstance(command, str) or not command or any(
+            character.isspace() for character in command
+        ):
+            raise ValueError("The command must be a single nonempty word.")
+        if argument is not None and (
+            not isinstance(argument, str) or "\r" in argument or "\n" in argument
+        ):
+            raise ValueError("The argument must be text without line breaks.")
 
-    def receive_response(self, connection):
-        # Parse status, a blank line, and any data on the protocol-required socket.
-        pass
+        message = command if argument is None else f"{command} {argument}"
+        self.control_socket.sendall((message + "\n").encode("utf-8"))
+
+    def receive_response(self, connection, data_length=0):
+        """Return (status, bytes), reading exactly data_length bytes after the header.
+
+        Payload size must be known by the caller; no length field is added to the
+        wire protocol. The default reads only the status and blank separator.
+        """
+        if connection is None:
+            raise RuntimeError("A response requires an open connection.")
+        if type(data_length) is not int or data_length < 0:
+            raise ValueError("The response data length must be a nonnegative integer.")
+
+        lines = []
+        for _ in range(2):
+            line = bytearray()
+            while True:
+                # Read only the header so file bytes or the next reply stay unread.
+                byte = connection.recv(1)
+                if not byte:
+                    raise EOFError("Connection closed before the response header completed.")
+                if byte == b"\n":
+                    break
+                line.extend(byte)
+                if len(line) > 16:
+                    raise ValueError("Response header line is too long.")
+            lines.append(bytes(line).removesuffix(b"\r"))
+
+        if lines[0] not in (b"200", b"500") or lines[1] != b"":
+            raise ValueError("Expected status 200 or 500 followed by a blank line.")
+
+        status_code = int(lines[0])
+        data = bytearray()
+        # Failure responses have no data, even when a successful reply would.
+        if status_code == 200:
+            while len(data) < data_length:
+                chunk = connection.recv(min(65536, data_length - len(data)))
+                if not chunk:
+                    raise EOFError("Connection closed before the response data completed.")
+                data.extend(chunk)
+        return status_code, bytes(data)
 
     def send_file(self, data_socket, source):
         # Send all file bytes using the required transfer-completion framing.

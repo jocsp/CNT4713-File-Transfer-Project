@@ -1,13 +1,38 @@
 # CNT4713 File Transfer Project
 
 Partial implementation: constructors, resource cleanup, the server control listener
-and acceptance loop, and client TCP connection helpers are implemented.
+and acceptance loop, client TCP connection helpers, and command/response helpers
+are implemented.
 The Chat handshake, server data-connection setup, file transfers, command loops,
 and entry points remain unfinished. Client `connect()` currently opens only the
 control socket; it does not yet negotiate or open the data connection automatically.
 The acceptance loop handles clients sequentially and closes each session when
 `handle_client()` returns; that handler is still a placeholder.
 The method breakdown is a suggested organization, not instructor-required naming.
+
+## Command and response helper contract
+
+The helpers currently use provisional UTF-8, LF-terminated command lines. Readers
+also accept CRLF. These framing choices need confirmation against the missing
+Chat Project specification before grader compatibility can be claimed.
+`send_command(command, argument)` sends one line and rejects embedded line breaks.
+`receive_command(session)` returns the complete line without its terminator, or
+`None` on a clean disconnect. A truncated line raises `EOFError`.
+
+`send_response(connection, status_code, data)` sends `200\n\n` or `500\n\n`,
+followed by optional success data (UTF-8 text or bytes). Failure replies have no
+payload. The caller selects the socket required for that stage of the protocol.
+`receive_response(connection, data_length=0)` returns `(status_code, data_bytes)`.
+By default it reads only the header; when a successful payload's length is known,
+the caller can request exactly that many bytes. Failure replies skip payload reads.
+The helper never guesses payload length from a receive call or a timeout, and it
+does not add a length field to the wire format. Unknown-length listings and file
+transfers still need the course's completion rule before they can be implemented.
+
+Malformed headers and oversized command lines raise `ValueError`, invalid UTF-8
+raises `UnicodeDecodeError`, and truncated messages raise `EOFError`. Future
+session/command loops must handle these errors and close the affected connection;
+they must not try to resume parsing an invalid or partially consumed message.
 
 ## Files
 

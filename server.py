@@ -69,8 +69,29 @@ class FileTransferServer:
         pass
 
     def receive_command(self, session):
-        # Read a complete control command using the required message framing.
-        pass
+        """Read one UTF-8 command line, or return None for a clean disconnect."""
+        connection = session.get("control_socket")
+        if connection is None:
+            raise RuntimeError("The session has no control connection.")
+
+        message = bytearray()
+        while True:
+            # LF framing is provisional until the original Chat spec is available.
+            byte = connection.recv(1)
+            if not byte:
+                if message:
+                    raise EOFError("Connection closed in the middle of a command.")
+                return None
+            if byte == b"\n":
+                break
+            message.extend(byte)
+            if len(message) > 65536:
+                raise ValueError("Command exceeds the 64 KiB limit.")
+
+        command = bytes(message).removesuffix(b"\r").decode("utf-8")
+        if not command.strip() or "\r" in command:
+            raise ValueError("Expected a nonempty command without embedded line breaks.")
+        return command
 
     def dispatch_command(self, session, command):
         # Validate command arguments and login state, then select a handler.
@@ -105,8 +126,24 @@ class FileTransferServer:
         pass
 
     def send_response(self, connection, status_code, data=None):
-        # Send status, a blank line, and optional data on the protocol-required socket.
-        pass
+        """Send a status line, blank line, and optional UTF-8 text or raw bytes."""
+        if connection is None:
+            raise RuntimeError("A response requires an open connection.")
+        if type(status_code) is not int or status_code not in (200, 500):
+            raise ValueError("Status must be 200 (success) or 500 (failure).")
+
+        if data is None:
+            payload = b""
+        elif isinstance(data, str):
+            payload = data.encode("utf-8")
+        elif isinstance(data, bytes):
+            payload = data
+        else:
+            raise TypeError("Response data must be text or bytes.")
+        if status_code == 500 and payload:
+            raise ValueError("Failure responses must contain only a status header.")
+
+        connection.sendall(f"{status_code}\n\n".encode("ascii") + payload)
 
     def receive_file(self, data_socket, destination):
         # Receive all file bytes using the required transfer-completion framing.
