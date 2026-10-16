@@ -7,6 +7,14 @@ newline-terminated text. The client is still a skeleton and must use the same fi
 framing when its transfer methods are implemented. The method breakdown is a
 suggested organization, not instructor-required naming.
 
+The client's `connect()` now completes the merged server's handshake: it sends
+`connect <address> <port>`, reads the status and newline-terminated data port,
+and opens the data socket. Setup uses a ten-second socket timeout, then restores
+blocking mode. Rejection, malformed replies, and connection failures close both
+sockets and reset connection state. Login and the interactive client remain TODOs.
+`receive_text_line()` reads one LF/CRLF-terminated UTF-8 line without consuming
+the next response.
+
 ## Command and response helper contract
 
 The command helpers use UTF-8, LF-terminated command lines; the server also accepts

@@ -33,18 +33,42 @@ class FileTransferClient:
             raise RuntimeError("Close the existing connection before reconnecting.")
 
         control_port = int(control_port)
-        connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        try:
-            connection.connect((server_address, control_port))
-        except (OSError, ValueError, TypeError, OverflowError):
-            connection.close()
-            raise
+        if not 1 <= control_port <= 65535:
+            raise ValueError("The control port must be between 1 and 65535.")
+        if not isinstance(server_address, str) or not server_address or any(
+            character.isspace() for character in server_address
+        ):
+            raise ValueError("The server address must be a single nonempty value.")
 
+        connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.control_socket = connection
-        self.server_address = server_address
-        self.control_port = control_port
-        # TODO: Read the Chat handshake and advertised port once its format is known,
-        # then call connect_data_socket(). TCP connection alone is not login.
+        try:
+            connection.settimeout(10)
+            connection.connect((server_address, control_port))
+            self.server_address = server_address
+            self.control_port = control_port
+            self.send_command("connect", f"{server_address} {control_port}")
+
+            status_code, _ = self.receive_response(connection)
+            if status_code != 200:
+                raise ConnectionError("500 status code received. Connection rejected.")
+
+            port_text = self.receive_text_line(connection, max_length=5)
+            if not port_text.isascii() or not port_text.isdecimal():
+                raise ValueError("The server returned an invalid data port.")
+            data_port = int(port_text)
+            if not 1 <= data_port <= 65535:
+                raise ValueError("The data port must be between 1 and 65535.")
+
+            print(
+                "200 status code received. Starting data connection on port "
+                f"{data_port}"
+            )
+            self.connect_data_socket(server_address, data_port)
+            connection.settimeout(None)
+        except (OSError, EOFError, ValueError, TypeError):
+            self.close_connections()
+            raise
 
     def connect_data_socket(self, server_address, data_port):
         if self.control_socket is None:
@@ -55,14 +79,39 @@ class FileTransferClient:
         data_port = int(data_port)
         connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
+            connection.settimeout(10)
             connection.connect((server_address, data_port))
+            connection.settimeout(None)
         except (OSError, ValueError, TypeError, OverflowError):
             connection.close()
             raise
 
         self.data_socket = connection
         self.data_port = data_port
-        # The handshake caller must print the required status after validating it.
+
+    def receive_text_line(self, connection, max_length=65536):
+        """Read one UTF-8 LF/CRLF line without consuming the following message."""
+        if connection is None:
+            raise RuntimeError("Reading text requires an open connection.")
+        if type(max_length) is not int or max_length < 0:
+            raise ValueError("The line limit must be a nonnegative integer.")
+
+        line = bytearray()
+        while True:
+            byte = connection.recv(1)
+            if not byte:
+                raise EOFError("Connection closed before the text line completed.")
+            if byte == b"\n":
+                payload = bytes(line).removesuffix(b"\r")
+                if len(payload) > max_length:
+                    raise ValueError("Response text line is too long.")
+                return payload.decode("utf-8")
+            line.extend(byte)
+            # Allow one extra byte only for a possible CRLF terminator.
+            if len(line) > max_length and not (
+                len(line) == max_length + 1 and byte == b"\r"
+            ):
+                raise ValueError("Response text line is too long.")
 
     def login(self, username):
         # Send the Chat login request and display the required status message.
