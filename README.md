@@ -1,20 +1,16 @@
 # CNT4713 File Transfer Project
 
-Partial implementation: constructors, resource cleanup, the server control listener
-and acceptance loop, client TCP connection helpers, and command/response helpers
-are implemented.
-The Chat handshake, server data-connection setup, file transfers, command loops,
-and entry points remain unfinished. Client `connect()` currently opens only the
-control socket; it does not yet negotiate or open the data connection automatically.
-The acceptance loop handles clients sequentially and closes each session when
-`handle_client()` returns; that handler is still a placeholder.
-The method breakdown is a suggested organization, not instructor-required naming.
+The server now implements the Chat control/data handshake, login, `who`, `broadcast`,
+`private`, and `quit` commands, plus the file-transfer commands in the handout. File
+transfers use an eight-byte unsigned big-endian length prefix; listings are
+newline-terminated text. The client is still a skeleton and must use the same file
+framing when its transfer methods are implemented. The method breakdown is a
+suggested organization, not instructor-required naming.
 
 ## Command and response helper contract
 
-The helpers currently use provisional UTF-8, LF-terminated command lines. Readers
-also accept CRLF. These framing choices need confirmation against the missing
-Chat Project specification before grader compatibility can be claimed.
+The command helpers use UTF-8, LF-terminated command lines; the server also accepts
+CRLF. The original Chat Project uses newline-terminated control commands.
 `send_command(command, argument)` sends one line and rejects embedded line breaks.
 `receive_command(session)` returns the complete line without its terminator, or
 `None` on a clean disconnect. A truncated line raises `EOFError`.
@@ -25,14 +21,19 @@ payload. The caller selects the socket required for that stage of the protocol.
 `receive_response(connection, data_length=0)` returns `(status_code, data_bytes)`.
 By default it reads only the header; when a successful payload's length is known,
 the caller can request exactly that many bytes. Failure replies skip payload reads.
-The helper never guesses payload length from a receive call or a timeout, and it
-does not add a length field to the wire format. Unknown-length listings and file
-transfers still need the course's completion rule before they can be implemented.
+The file-transfer handout does not specify how a receiver detects the end of an
+arbitrary TCP file payload, so this project uses an unsigned eight-byte, big-endian
+length prefix after a successful `retr` response. For `stor`, the client must prefix
+its upload with the same eight-byte length; the server returns the status after
+receiving it. The `list` response is a comma-separated UTF-8 line terminated by LF.
+This file framing rule is project-selected, not specified by the handout, and the
+client implementation must match it.
 
-Malformed headers and oversized command lines raise `ValueError`, invalid UTF-8
-raises `UnicodeDecodeError`, and truncated messages raise `EOFError`. Future
-session/command loops must handle these errors and close the affected connection;
-they must not try to resume parsing an invalid or partially consumed message.
+Oversized command lines raise `ValueError`, invalid UTF-8 raises
+`UnicodeDecodeError`, and truncated messages raise `EOFError`. The server closes a
+client connection after malformed or partially consumed control lines. Invalid
+command arguments receive a 500 status; the client must not try to resume parsing
+a partially consumed response.
 
 ## Files
 
@@ -67,20 +68,12 @@ console output shown on pages 3-5 of the handout, including capitalization.
 Addresses, ports, usernames, messages, and filenames must remain variable because
 the grader pairs each submitted program with its own client or server.
 
-## Details to resolve before implementation
+## Remaining implementation details
 
-- The earlier Chat Project specification/code is absent from the supplied files
-  and repository. Obtain it to fill in the original commands, handshake, login,
-  data-port negotiation, and exact wire format. The generic Chat handler is only
-  a placeholder until those actual commands are known.
-- Confirm message boundaries, file-transfer completion, byte encoding for text,
-  and data-connection reuse against the course protocol. TCP is a byte stream;
-  one receive call is not guaranteed to return one entire message or file.
-- Confirm status placement and sequencing for each transfer. The examples do
-  not fully define the bytes exchanged, especially the connect response and
-  successful download. Do not invent a protocol incompatible with the grader.
-- The overview mentions creating/navigating directories, but the command table
-  defines no directory commands. No extra directory commands are assumed here.
+- The client is unfinished and must implement the matching eight-byte length
+  prefix for file transfers and LF-terminated listing reads.
+- The handout mentions creating and navigating directories but defines no directory
+  commands. No extra directory commands are assumed here.
 
 Chapter 2 supplies TCP client/server socket background. Chapter 4 supplies IP and
 network-layer background; it does not define additional application commands.
