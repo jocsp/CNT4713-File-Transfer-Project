@@ -114,8 +114,25 @@ class FileTransferClient:
                 raise ValueError("Response text line is too long.")
 
     def login(self, username):
-        # Send the Chat login request and display the required status message.
-        pass
+        self._require_connection()
+        if not username or any(character.isspace() for character in username):
+            raise ValueError("Username must be a single nonempty word.")
+        if self.username is not None:
+            raise ValueError("Already logged in.")
+        self.send_command("login", username)
+        status, _ = self.receive_response(self.data_socket)
+        if status == 200:
+            self.username = username
+            print("200 status code received. Login successful")
+        else:
+            print("500 status code received. Login failed")
+        return status
+
+    def _require_connection(self, logged_in=False):
+        if self.control_socket is None or self.data_socket is None:
+            raise ValueError("Connect to the server first.")
+        if logged_in and self.username is None:
+            raise ValueError("Log in first.")
 
     def handle_chat_command(self, command, arguments):
         # Preserve earlier Chat commands once their missing specification is available.
@@ -138,8 +155,14 @@ class FileTransferClient:
         pass
 
     def quit(self):
-        # Send `quit`, display its status, and close the client's connections.
-        pass
+        try:
+            if self.control_socket is not None and self.username is not None:
+                self.send_command("quit")
+                status, _ = self.receive_response(self.data_socket)
+                print(f"{status} status code received.")
+        finally:
+            self.close_connections()
+            self.running = False
 
     def send_command(self, command, argument=None):
         """Send one UTF-8 command line; LF framing awaits Chat-spec confirmation."""
