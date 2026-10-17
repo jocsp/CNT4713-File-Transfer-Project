@@ -56,7 +56,11 @@ class FileTransferClient:
             if arguments:
                 raise ValueError("Usage: quit")
             return self.quit()
-        if command in ("list", "stor", "retr", "dele", "who", "broadcast", "private"):
+        if command == "list":
+            if arguments:
+                raise ValueError("Usage: list")
+            return self.list_files()
+        if command in ("stor", "retr", "dele", "who", "broadcast", "private"):
             raise NotImplementedError(f"The {command} command is not implemented yet.")
         raise ValueError(f"Unknown command: {command}")
 
@@ -171,8 +175,15 @@ class FileTransferClient:
         pass
 
     def list_files(self):
-        # Send `list`, receive the data-channel listing, and print the required result.
-        pass
+        self._require_connection(logged_in=True)
+        self.send_command("list")
+        status, _ = self.receive_response(self.data_socket)
+        if status == 200:
+            listing = self.receive_text_line(self.data_socket)
+            print(f"200 status code received. Files: {listing}")
+            return listing
+        print("500 status code received.")
+        return None
 
     def store_file(self, filename):
         # Send `stor <filename>`, upload the local file, and display the result.
