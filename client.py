@@ -2,6 +2,7 @@
 
 import os
 import socket
+import tempfile
 
 
 class FileTransferClient:
@@ -66,7 +67,9 @@ class FileTransferClient:
             return self.list_files()
         if command == "stor":
             return self.store_file(arguments)
-        if command in ("retr", "dele", "who", "broadcast", "private"):
+        if command == "retr":
+            return self.retrieve_file(arguments)
+        if command in ("dele", "who", "broadcast", "private"):
             raise NotImplementedError(f"The {command} command is not implemented yet.")
         raise ValueError(f"Unknown command: {command}")
 
@@ -217,8 +220,20 @@ class FileTransferClient:
             raise ValueError("Use a filename in the current directory.")
 
     def retrieve_file(self, filename):
-        # Send `retr <filename>`, save received bytes locally, and display the result.
-        pass
+        self._require_connection(logged_in=True)
+        self._validate_filename(filename)
+        try:
+            self.send_command("retr", filename)
+            status, _ = self.receive_response(self.data_socket)
+            if status == 200:
+                self.receive_file(self.data_socket, filename)
+                print("File retrieved.")
+            else:
+                print("500 status code received.")
+            return status
+        except (OSError, EOFError, ValueError):
+            self.close_connections()
+            raise
 
     def delete_file(self, filename):
         # Send `dele <filename>` and display the returned deletion status.
@@ -305,8 +320,35 @@ class FileTransferClient:
         return length
 
     def receive_file(self, data_socket, destination):
-        # Receive all file bytes using the required transfer-completion framing.
-        pass
+        if data_socket is None:
+            raise ValueError("A file transfer requires a data connection.")
+        prefix = bytearray()
+        while len(prefix) < self.FILE_LENGTH_BYTES:
+            chunk = data_socket.recv(self.FILE_LENGTH_BYTES - len(prefix))
+            if not chunk:
+                raise EOFError("Connection closed before the file length arrived.")
+            prefix.extend(chunk)
+        length = int.from_bytes(prefix, "big")
+        remaining = length
+        temporary_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="wb", prefix=".download-",
+                dir=os.path.dirname(os.path.abspath(destination)), delete=False
+            ) as output:
+                temporary_path = output.name
+                while remaining:
+                    chunk = data_socket.recv(min(self.TRANSFER_CHUNK_SIZE, remaining))
+                    if not chunk:
+                        raise EOFError("Connection closed before the file completed.")
+                    output.write(chunk)
+                    remaining -= len(chunk)
+            os.replace(temporary_path, destination)
+            temporary_path = None
+        finally:
+            if temporary_path is not None:
+                os.remove(temporary_path)
+        return length
 
     def close_connections(self):
         for attribute in ("data_socket", "control_socket"):
