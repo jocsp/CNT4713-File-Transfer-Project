@@ -17,16 +17,48 @@ class FileTransferClient:
         self.running = False
 
     def run(self):
-        # Print the startup message and process interactive commands until quit.
-        pass
+        print("Starting client…")
+        self.running = True
+        try:
+            while self.running:
+                try:
+                    command, arguments = self.read_command()
+                except (EOFError, KeyboardInterrupt):
+                    break
+                if not command:
+                    continue
+                try:
+                    self.dispatch_command(command, arguments)
+                except (OSError, EOFError) as error:
+                    print(f"Connection error: {error}")
+                    self.close_connections()
+                except (ValueError, RuntimeError, NotImplementedError) as error:
+                    print(f"Error: {error}")
+        finally:
+            self.close_connections()
+            self.running = False
 
     def read_command(self):
-        # Read and parse user input without hardcoding addresses, names, or ports.
-        pass
+        parts = input().strip().split(None, 1)
+        if not parts:
+            return "", ""
+        return parts[0].lower(), parts[1] if len(parts) == 2 else ""
 
     def dispatch_command(self, command, arguments):
-        # Validate command arguments and connection state, then select a handler.
-        pass
+        if command == "connect":
+            parts = arguments.split()
+            if len(parts) != 2:
+                raise ValueError("Usage: connect <address> <port>")
+            return self.connect(parts[0], parts[1])
+        if command == "login":
+            return self.login(arguments)
+        if command == "quit":
+            if arguments:
+                raise ValueError("Usage: quit")
+            return self.quit()
+        if command in ("list", "stor", "retr", "dele", "who", "broadcast", "private"):
+            raise NotImplementedError(f"The {command} command is not implemented yet.")
+        raise ValueError(f"Unknown command: {command}")
 
     def connect(self, server_address, control_port):
         if self.control_socket is not None:
@@ -248,5 +280,8 @@ class FileTransferClient:
 
 
 def main():
-    # Start the interactive client for `python client.py` with the required output.
-    pass
+    FileTransferClient().run()
+
+
+if __name__ == "__main__":
+    main()
