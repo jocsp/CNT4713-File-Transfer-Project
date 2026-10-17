@@ -1,9 +1,10 @@
-"""File-transfer client with TCP connection helpers, state, and cleanup."""
+"""Interactive TCP file-transfer and Chat client."""
 
 import os
+import queue
 import select
 import socket
-import sys
+import threading
 import tempfile
 
 
@@ -26,22 +27,37 @@ class FileTransferClient:
     def run(self):
         print("Starting client…")
         self.running = True
+        commands = queue.Queue()
+
+        def read_input():
+            # Only this thread reads stdin; the main thread alone reads sockets.
+            while True:
+                try:
+                    command = self.read_command()
+                except (EOFError, KeyboardInterrupt):
+                    commands.put(None)
+                    return
+                commands.put(command)
+                if command == ("quit", ""):
+                    return
+
+        threading.Thread(target=read_input, daemon=True).start()
         try:
             while self.running:
                 try:
-                    # One reader owns the data stream, including while awaiting input.
                     if self.data_socket is not None:
-                        readable, _, _ = select.select([sys.stdin, self.data_socket], [], [])
-                        if self.data_socket in readable:
+                        readable, _, _ = select.select([self.data_socket], [], [], 0.05)
+                        if readable:
                             self.receive_notification()
-                        if sys.stdin not in readable:
-                            continue
                     try:
-                        command, arguments = self.read_command()
-                    except EOFError:
+                        command = commands.get(timeout=0.05)
+                    except queue.Empty:
+                        continue
+                    if command is None:
                         break
-                    if command:
-                        self.dispatch_command(command, arguments)
+                    name, arguments = command
+                    if name:
+                        self.dispatch_command(name, arguments)
                 except (OSError, EOFError) as error:
                     print(f"Connection error: {error}")
                     self.close_connections()
@@ -161,13 +177,19 @@ class FileTransferClient:
             if byte == b"\n":
                 payload = bytes(line).removesuffix(b"\r")
                 if len(payload) > max_length:
+                    self.close_connections()
                     raise ValueError("Response text line is too long.")
-                return payload.decode("utf-8")
+                try:
+                    return payload.decode("utf-8")
+                except UnicodeDecodeError:
+                    self.close_connections()
+                    raise
             line.extend(byte)
             # Allow one extra byte only for a possible CRLF terminator.
             if len(line) > max_length and not (
                 len(line) == max_length + 1 and byte == b"\r"
             ):
+                self.close_connections()
                 raise ValueError("Response text line is too long.")
 
     def login(self, username):
@@ -308,7 +330,7 @@ class FileTransferClient:
             self.running = False
 
     def send_command(self, command, argument=None):
-        """Send one UTF-8 command line; LF framing awaits Chat-spec confirmation."""
+        """Send one UTF-8 command line using this project's LF framing."""
         if self.control_socket is None:
             raise RuntimeError("Open a control connection before sending commands.")
         if not isinstance(command, str) or not command or any(
@@ -321,7 +343,10 @@ class FileTransferClient:
             raise ValueError("The argument must be text without line breaks.")
 
         message = command if argument is None else f"{command} {argument}"
-        self.control_socket.sendall((message + "\n").encode("utf-8"))
+        encoded = message.encode("utf-8")
+        if len(encoded) > 65536:
+            raise ValueError("Command exceeds the 64 KiB limit.")
+        self.control_socket.sendall(encoded + b"\n")
 
     def receive_response(self, connection, data_length=0):
         """Return (status, bytes), reading exactly data_length bytes after the header.
@@ -344,6 +369,7 @@ class FileTransferClient:
             break
 
         if lines[0] not in (b"200", b"500") or lines[1] != b"":
+            self.close_connections()
             raise ValueError("Expected status 200 or 500 followed by a blank line.")
 
         status_code = int(lines[0])
