@@ -272,6 +272,7 @@ class FileTransferServer:
             self.broadcast_to_data(
                 self._build_response(200, "Broadcast", username, argument)
             )
+            self._send_data_response(session, 200)
             return
 
         if name == "private":
@@ -478,7 +479,8 @@ class FileTransferServer:
     @staticmethod
     def _build_response(status_code, *lines):
         payload = "".join(f"{line}\n" for line in lines if line is not None)
-        return f"{status_code}\n\n{payload}".encode("utf-8")
+        # An explicit marker distinguishes unsolicited events from ordinary replies.
+        return f"EVENT\n{status_code}\n\n{payload}".encode("utf-8")
 
     def _send_data_response(self, session, status_code, data=None):
         connection = session.get("data_socket")

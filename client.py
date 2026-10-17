@@ -1,7 +1,9 @@
 """File-transfer client with TCP connection helpers, state, and cleanup."""
 
 import os
+import select
 import socket
+import sys
 import tempfile
 
 
@@ -27,18 +29,26 @@ class FileTransferClient:
         try:
             while self.running:
                 try:
-                    command, arguments = self.read_command()
-                except (EOFError, KeyboardInterrupt):
-                    break
-                if not command:
-                    continue
-                try:
-                    self.dispatch_command(command, arguments)
+                    # One reader owns the data stream, including while awaiting input.
+                    if self.data_socket is not None:
+                        readable, _, _ = select.select([sys.stdin, self.data_socket], [], [])
+                        if self.data_socket in readable:
+                            self.receive_notification()
+                        if sys.stdin not in readable:
+                            continue
+                    try:
+                        command, arguments = self.read_command()
+                    except EOFError:
+                        break
+                    if command:
+                        self.dispatch_command(command, arguments)
                 except (OSError, EOFError) as error:
                     print(f"Connection error: {error}")
                     self.close_connections()
-                except (ValueError, RuntimeError, NotImplementedError) as error:
+                except (ValueError, RuntimeError) as error:
                     print(f"Error: {error}")
+        except KeyboardInterrupt:
+            pass
         finally:
             self.close_connections()
             self.running = False
@@ -72,7 +82,7 @@ class FileTransferClient:
         if command == "dele":
             return self.delete_file(arguments)
         if command in ("who", "broadcast", "private"):
-            raise NotImplementedError(f"The {command} command is not implemented yet.")
+            return self.handle_chat_command(command, arguments)
         raise ValueError(f"Unknown command: {command}")
 
     def connect(self, server_address, control_port):
@@ -182,8 +192,47 @@ class FileTransferClient:
             raise ValueError("Log in first.")
 
     def handle_chat_command(self, command, arguments):
-        # Preserve earlier Chat commands once their missing specification is available.
-        pass
+        self._require_connection(logged_in=True)
+        if command == "who":
+            if arguments:
+                raise ValueError("Usage: who")
+        elif command == "broadcast":
+            if not arguments.strip():
+                raise ValueError("Usage: broadcast <message>")
+        elif command == "private":
+            if len(arguments.split(None, 1)) != 2:
+                raise ValueError("Usage: private <username> <message>")
+        else:
+            raise ValueError(f"Unknown Chat command: {command}")
+        self.send_command(command, arguments if arguments else None)
+        status, _ = self.receive_response(self.data_socket)
+        if status == 200 and command == "who":
+            names = self.receive_text_line(self.data_socket)
+            print(f"200 status code received. Users: {names}")
+            return names
+        print(f"{status} status code received.")
+        return status
+
+    def receive_notification(self):
+        """Consume an idle EVENT frame without stealing a command response."""
+        if self.receive_text_line(self.data_socket, max_length=16) != "EVENT":
+            self.close_connections()
+            raise ValueError("Unexpected response while waiting for a notification.")
+        self._receive_event(self.data_socket)
+
+    def _receive_event(self, connection):
+        status = self.receive_text_line(connection, max_length=16)
+        separator = self.receive_text_line(connection, max_length=16)
+        kind = self.receive_text_line(connection, max_length=16)
+        if status != "200" or separator or kind not in ("join", "logout", "Broadcast", "Private"):
+            self.close_connections()
+            raise ValueError("Malformed Chat notification.")
+        username = self.receive_text_line(connection)
+        if kind in ("Broadcast", "Private"):
+            message = self.receive_text_line(connection)
+            print(f"{kind} from {username}: {message}")
+        else:
+            print(f"{username} {'joined' if kind == 'join' else 'logged out'}.")
 
     def list_files(self):
         self._require_connection(logged_in=True)
@@ -285,20 +334,14 @@ class FileTransferClient:
         if type(data_length) is not int or data_length < 0:
             raise ValueError("The response data length must be a nonnegative integer.")
 
-        lines = []
-        for _ in range(2):
-            line = bytearray()
-            while True:
-                # Read only the header so file bytes or the next reply stay unread.
-                byte = connection.recv(1)
-                if not byte:
-                    raise EOFError("Connection closed before the response header completed.")
-                if byte == b"\n":
-                    break
-                line.extend(byte)
-                if len(line) > 16:
-                    raise ValueError("Response header line is too long.")
-            lines.append(bytes(line).removesuffix(b"\r"))
+        while True:
+            status_line = self.receive_text_line(connection, max_length=16)
+            if status_line == "EVENT":
+                self._receive_event(connection)
+                continue
+            separator = self.receive_text_line(connection, max_length=16)
+            lines = [status_line.encode("utf-8"), separator.encode("utf-8")]
+            break
 
         if lines[0] not in (b"200", b"500") or lines[1] != b"":
             raise ValueError("Expected status 200 or 500 followed by a blank line.")

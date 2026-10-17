@@ -102,3 +102,19 @@ network-layer background; it does not define additional application commands.
 The supplied LMS export (`Project 2.pdf`) lists 130 points: 70 for client/server
 functionality, 30 for the video, and 30 for AI usage. It takes precedence over the
 older grading table in the project handout.
+
+## Chat event framing
+
+The client implements `who`, `broadcast`, and `private`, plus join/logout and
+incoming-message notifications. To distinguish asynchronous notifications from
+ordinary command replies on the same data stream, this branch prefixes each
+notification with `EVENT\n`, followed by `200\n\n`, its kind (`join`, `logout`,
+`Broadcast`, or `Private`), username, and (for messages) message text as LF-ended
+lines. Broadcast also returns an ordinary status acknowledgement to its sender.
+The client skips and displays event frames while awaiting a command response, and
+uses `select` to display notifications while waiting for terminal input.
+
+This EVENT marker is a project-specific protocol extension, not a requirement
+verified from the missing original Chat specification. It requires the updated
+client and server together. The instructor's reference-client/server compatibility
+must be checked before submission, including the existing eight-byte file prefix.
