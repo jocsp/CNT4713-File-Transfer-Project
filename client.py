@@ -1,9 +1,13 @@
 """File-transfer client with TCP connection helpers, state, and cleanup."""
 
+import os
 import socket
 
 
 class FileTransferClient:
+    FILE_LENGTH_BYTES = 8
+    TRANSFER_CHUNK_SIZE = 65536
+
     def __init__(self):
         # Connection details and sockets are populated by the connect methods.
         self.server_address = None
@@ -60,7 +64,9 @@ class FileTransferClient:
             if arguments:
                 raise ValueError("Usage: list")
             return self.list_files()
-        if command in ("stor", "retr", "dele", "who", "broadcast", "private"):
+        if command == "stor":
+            return self.store_file(arguments)
+        if command in ("retr", "dele", "who", "broadcast", "private"):
             raise NotImplementedError(f"The {command} command is not implemented yet.")
         raise ValueError(f"Unknown command: {command}")
 
@@ -186,8 +192,29 @@ class FileTransferClient:
         return None
 
     def store_file(self, filename):
-        # Send `stor <filename>`, upload the local file, and display the result.
-        pass
+        self._require_connection(logged_in=True)
+        self._validate_filename(filename)
+        # Open before sending the command so local failures do not stall the server.
+        with open(filename, "rb") as source:
+            try:
+                self.send_command("stor", filename)
+                self.send_file(self.data_socket, source)
+                status, _ = self.receive_response(self.data_socket)
+            except (OSError, EOFError, ValueError):
+                self.close_connections()
+                raise
+        if status == 200:
+            print("200 status code received. File Sent.")
+        else:
+            print("500 status code received.")
+        return status
+
+    @staticmethod
+    def _validate_filename(filename):
+        if not filename or filename in (".", "..") or any(
+            character in filename for character in ("/", "\\", ":", "\0", "\r", "\n")
+        ):
+            raise ValueError("Use a filename in the current directory.")
 
     def retrieve_file(self, filename):
         # Send `retr <filename>`, save received bytes locally, and display the result.
@@ -264,8 +291,18 @@ class FileTransferClient:
         return status_code, bytes(data)
 
     def send_file(self, data_socket, source):
-        # Send all file bytes using the required transfer-completion framing.
-        pass
+        if data_socket is None:
+            raise ValueError("A file transfer requires a data connection.")
+        length = os.fstat(source.fileno()).st_size - source.tell()
+        data_socket.sendall(length.to_bytes(self.FILE_LENGTH_BYTES, "big"))
+        remaining = length
+        while remaining:
+            chunk = source.read(min(self.TRANSFER_CHUNK_SIZE, remaining))
+            if not chunk:
+                raise EOFError("The source file changed during upload.")
+            data_socket.sendall(chunk)
+            remaining -= len(chunk)
+        return length
 
     def receive_file(self, data_socket, destination):
         # Receive all file bytes using the required transfer-completion framing.
