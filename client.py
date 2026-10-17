@@ -69,7 +69,9 @@ class FileTransferClient:
             return self.store_file(arguments)
         if command == "retr":
             return self.retrieve_file(arguments)
-        if command in ("dele", "who", "broadcast", "private"):
+        if command == "dele":
+            return self.delete_file(arguments)
+        if command in ("who", "broadcast", "private"):
             raise NotImplementedError(f"The {command} command is not implemented yet.")
         raise ValueError(f"Unknown command: {command}")
 
@@ -236,8 +238,15 @@ class FileTransferClient:
             raise
 
     def delete_file(self, filename):
-        # Send `dele <filename>` and display the returned deletion status.
-        pass
+        self._require_connection(logged_in=True)
+        self._validate_filename(filename)
+        self.send_command("dele", filename)
+        status, _ = self.receive_response(self.data_socket)
+        if status == 200:
+            print("200 status code received. File deleted.")
+        else:
+            print("500 status code received.")
+        return status
 
     def quit(self):
         try:
